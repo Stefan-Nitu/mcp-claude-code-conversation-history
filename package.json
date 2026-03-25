@@ -1,6 +1,6 @@
 {
   "name": "mcp-claude-code-memory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for searching and browsing Claude Code conversation history",
   "type": "module",
   "main": "dist/index.js",
