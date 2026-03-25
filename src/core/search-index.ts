@@ -31,16 +31,19 @@ export class SearchIndex {
         "messageType",
         "timestamp",
       ],
-      tokenize: (text) =>
-        text
-          .toLowerCase()
-          .split(/[\s_\-/.,;:!?'"()[\]{}]+/)
-          .filter((w) => w.length > 1),
+      tokenize: (text) => this.tokenize(text),
       searchOptions: {
         fuzzy: 0.2,
         prefix: true,
       },
     });
+  }
+
+  tokenize(text: string): string[] {
+    return text
+      .toLowerCase()
+      .split(/[\s_\-/.,;:!?'"()[\]{}]+/)
+      .filter((w) => w.length > 1);
   }
 
   buildFrom(conversations: Conversation[]): void {

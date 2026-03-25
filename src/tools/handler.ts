@@ -9,6 +9,8 @@ const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_MATCHES_PER_RESULT = 5;
 const PREVIEW_MAX = 150;
 const MATCH_CONTENT_MAX = 200;
+const READ_CONTENT_MAX = 500;
+const READ_CONTEXT_MESSAGES = 2;
 
 function cleanProjectName(cwd: string, rawProject: string): string {
   if (cwd) return basename(cwd);
@@ -54,7 +56,7 @@ export function createHandler(store: ConversationStore, index: SearchIndex) {
         case "list":
           return handleList(args, store);
         case "read":
-          return handleRead(args, store);
+          return handleRead(args, store, index);
         case "stats":
           return handleStats(store);
         default:
@@ -112,7 +114,11 @@ function handleList(args: Args, store: ConversationStore): string {
   });
 }
 
-function handleRead(args: Args, store: ConversationStore): string {
+function handleRead(
+  args: Args,
+  store: ConversationStore,
+  index: SearchIndex,
+): string {
   const sessionId = args.session_id as string | undefined;
   if (!sessionId) {
     return JSON.stringify({ error: "session_id is required for read action" });
@@ -123,16 +129,45 @@ function handleRead(args: Args, store: ConversationStore): string {
     return JSON.stringify({ error: `Conversation not found: ${sessionId}` });
   }
 
-  let messages = conversation.messages;
+  const query = args.query as string | undefined;
+  const allMessages = conversation.messages;
 
+  if (query) {
+    return handleReadGrep(conversation, allMessages, query, index);
+  }
+
+  return handleReadBrowse(conversation, allMessages, args);
+}
+
+function handleReadBrowse(
+  conversation: {
+    sessionId: string;
+    project: string;
+    cwd: string;
+    startedAt: string;
+    lastMessageAt: string;
+    messageCount: number;
+  },
+  allMessages: Array<{
+    type: "user" | "assistant";
+    content: string;
+    timestamp: string;
+    uuid: string;
+  }>,
+  args: Args,
+): string {
+  let messages = allMessages;
   const offset = args.offset as number | undefined;
   const limit = args.limit as number | undefined;
+
   if (offset !== undefined) {
     messages = messages.slice(offset);
   }
   if (limit !== undefined) {
     messages = messages.slice(0, limit);
   }
+
+  const fullContent = limit === 1;
 
   return JSON.stringify({
     action: "read",
@@ -144,9 +179,88 @@ function handleRead(args: Args, store: ConversationStore): string {
     totalMessages: conversation.messageCount,
     messages: messages.map((m) => ({
       type: m.type,
-      content: m.content,
+      content:
+        fullContent || m.content.length <= READ_CONTENT_MAX
+          ? m.content
+          : m.content.slice(0, READ_CONTENT_MAX),
+      contentLength: m.content.length,
       timestamp: m.timestamp,
     })),
+  });
+}
+
+function handleReadGrep(
+  conversation: {
+    sessionId: string;
+    project: string;
+    cwd: string;
+    startedAt: string;
+    lastMessageAt: string;
+    messageCount: number;
+  },
+  allMessages: Array<{
+    type: "user" | "assistant";
+    content: string;
+    timestamp: string;
+    uuid: string;
+  }>,
+  query: string,
+  index: SearchIndex,
+): string {
+  const matchingIndices = new Set<number>();
+  const terms = index.tokenize(query);
+
+  for (let i = 0; i < allMessages.length; i++) {
+    const msgTerms = index.tokenize(allMessages[i]!.content);
+    if (terms.some((t) => msgTerms.some((mt) => mt.includes(t)))) {
+      matchingIndices.add(i);
+    }
+  }
+
+  if (matchingIndices.size === 0) {
+    return JSON.stringify({
+      action: "read",
+      sessionId: conversation.sessionId,
+      project: cleanProjectName(conversation.cwd, conversation.project),
+      totalMessages: conversation.messageCount,
+      query,
+      messages: [],
+    });
+  }
+
+  const includeIndices = new Set<number>();
+  for (const idx of matchingIndices) {
+    for (
+      let i = Math.max(0, idx - READ_CONTEXT_MESSAGES);
+      i <= Math.min(allMessages.length - 1, idx + READ_CONTEXT_MESSAGES);
+      i++
+    ) {
+      includeIndices.add(i);
+    }
+  }
+
+  const sortedIndices = [...includeIndices].sort((a, b) => a - b);
+
+  return JSON.stringify({
+    action: "read",
+    sessionId: conversation.sessionId,
+    project: cleanProjectName(conversation.cwd, conversation.project),
+    totalMessages: conversation.messageCount,
+    query,
+    messages: sortedIndices.map((i) => {
+      const m = allMessages[i]!;
+      return {
+        index: i,
+        type: m.type,
+        content:
+          m.content.length <= READ_CONTENT_MAX
+            ? m.content
+            : m.content.slice(0, READ_CONTENT_MAX),
+        contentLength: m.content.length,
+        match: matchingIndices.has(i),
+        timestamp: m.timestamp,
+      };
+    }),
   });
 }
 

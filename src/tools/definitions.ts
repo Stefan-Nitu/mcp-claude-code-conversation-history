@@ -5,7 +5,9 @@ export const historyToolSchema = z.object({
   query: z
     .string()
     .optional()
-    .describe("Search keywords (required for search)"),
+    .describe(
+      "Search keywords (required for search, optional for read to grep within a conversation)",
+    ),
   session_id: z
     .string()
     .optional()

@@ -207,15 +207,258 @@ describe("claude_code_conversation_history tool", () => {
   });
 
   describe("action: read", () => {
-    it("returns full conversation messages", () => {
+    it("includes contentLength on each message", () => {
       // Act
       const result = handler.handle({ action: "read", session_id: "sess-ui" });
 
       // Assert
       const parsed = JSON.parse(result);
-      expect(parsed.messages).toHaveLength(3);
-      expect(parsed.messages[0].type).toBe("user");
-      expect(parsed.messages[0].content).toContain("CSS buttons");
+      expect(parsed.messages[0].contentLength).toBe(
+        "align the CSS buttons properly".length,
+      );
+    });
+
+    it("truncates long messages to 500 chars by default", async () => {
+      // Arrange
+      const longContent = "word ".repeat(200);
+      setupFixture("-Users-test-Projects-longread", "sess-longread", [
+        makeLine({
+          uuid: "u-lr1",
+          cwd: "/Users/test/Projects/longread",
+          message: { role: "user", content: longContent },
+        }),
+      ]);
+      const s = new ConversationStore(TEST_DIR);
+      await s.load();
+      const idx = new SearchIndex();
+      idx.buildFrom(s.getAllConversations());
+      const h = createHandler(s, idx);
+      h.setReady();
+
+      // Act
+      const result = h.handle({
+        action: "read",
+        session_id: "sess-longread",
+      });
+
+      // Assert
+      const parsed = JSON.parse(result);
+      expect(parsed.messages[0].content.length).toBeLessThanOrEqual(500);
+      expect(parsed.messages[0].contentLength).toBe(longContent.length);
+    });
+
+    it("does not truncate short messages", () => {
+      // Act
+      const result = handler.handle({ action: "read", session_id: "sess-ui" });
+
+      // Assert
+      const parsed = JSON.parse(result);
+      expect(parsed.messages[0].content).toBe("align the CSS buttons properly");
+    });
+
+    it("returns full content when limit is 1", async () => {
+      // Arrange
+      const longContent = "word ".repeat(200);
+      setupFixture("-Users-test-Projects-focus", "sess-focus", [
+        makeLine({
+          uuid: "u-f1",
+          cwd: "/Users/test/Projects/focus",
+          message: { role: "user", content: longContent },
+        }),
+      ]);
+      const s = new ConversationStore(TEST_DIR);
+      await s.load();
+      const idx = new SearchIndex();
+      idx.buildFrom(s.getAllConversations());
+      const h = createHandler(s, idx);
+      h.setReady();
+
+      // Act
+      const result = h.handle({
+        action: "read",
+        session_id: "sess-focus",
+        offset: 0,
+        limit: 1,
+      });
+
+      // Assert
+      const parsed = JSON.parse(result);
+      expect(parsed.messages).toHaveLength(1);
+      expect(parsed.messages[0].content).toBe(longContent);
+    });
+
+    describe("query param (grep mode)", () => {
+      let h: ReturnType<typeof createHandler>;
+
+      beforeEach(async () => {
+        // Arrange — 7 messages, "scaling" appears in messages 2 and 5 (0-indexed)
+        setupFixture("-Users-test-Projects-grep", "sess-grep", [
+          makeLine({
+            uuid: "g0",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:00:00.000Z",
+            message: { role: "user", content: "hello, let's start" },
+          }),
+          makeLine({
+            type: "assistant",
+            uuid: "g1",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:01:00.000Z",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "sure, what's up?" }],
+            },
+          }),
+          makeLine({
+            uuid: "g2",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:02:00.000Z",
+            message: {
+              role: "user",
+              content: "we have a scaling problem",
+            },
+          }),
+          makeLine({
+            type: "assistant",
+            uuid: "g3",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:03:00.000Z",
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "I see, let me look at the code" },
+              ],
+            },
+          }),
+          makeLine({
+            uuid: "g4",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:04:00.000Z",
+            message: { role: "user", content: "what about caching?" },
+          }),
+          makeLine({
+            type: "assistant",
+            uuid: "g5",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:05:00.000Z",
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "text",
+                  text: "scaling can be solved with dynamic tools",
+                },
+              ],
+            },
+          }),
+          makeLine({
+            uuid: "g6",
+            cwd: "/Users/test/Projects/grep",
+            timestamp: "2026-03-25T12:06:00.000Z",
+            message: { role: "user", content: "sounds good, let's do it" },
+          }),
+        ]);
+        const s = new ConversationStore(TEST_DIR);
+        await s.load();
+        const idx = new SearchIndex();
+        idx.buildFrom(s.getAllConversations());
+        h = createHandler(s, idx);
+        h.setReady();
+      });
+
+      it("returns matching messages with surrounding context", () => {
+        // Act
+        const result = h.handle({
+          action: "read",
+          session_id: "sess-grep",
+          query: "scaling",
+        });
+
+        // Assert
+        const parsed = JSON.parse(result);
+        const indices = parsed.messages.map((m: { index: number }) => m.index);
+        // match at index 2: context should include 0,1,2,3,4
+        // match at index 5: context should include 3,4,5,6
+        // merged: 0,1,2,3,4,5,6
+        expect(indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+      });
+
+      it("marks which messages matched the query", () => {
+        // Act
+        const result = h.handle({
+          action: "read",
+          session_id: "sess-grep",
+          query: "scaling",
+        });
+
+        // Assert
+        const parsed = JSON.parse(result);
+        const matched = parsed.messages.filter(
+          (m: { match: boolean }) => m.match,
+        );
+        expect(matched).toHaveLength(2);
+        expect(matched[0].content).toContain("scaling problem");
+        expect(matched[1].content).toContain("scaling can be solved");
+      });
+
+      it("includes message index from original conversation", () => {
+        // Act
+        const result = h.handle({
+          action: "read",
+          session_id: "sess-grep",
+          query: "caching",
+        });
+
+        // Assert
+        const parsed = JSON.parse(result);
+        const matched = parsed.messages.find(
+          (m: { match: boolean }) => m.match,
+        );
+        expect(matched.index).toBe(4);
+      });
+
+      it("returns empty messages array when query has no matches", () => {
+        // Act
+        const result = h.handle({
+          action: "read",
+          session_id: "sess-grep",
+          query: "nonexistent_xyz",
+        });
+
+        // Assert
+        const parsed = JSON.parse(result);
+        expect(parsed.messages).toHaveLength(0);
+      });
+
+      it("truncates long content in grep results", async () => {
+        // Arrange
+        const longContent = `scaling ${"details ".repeat(200)}`;
+        setupFixture("-Users-test-Projects-greplong", "sess-greplong", [
+          makeLine({
+            uuid: "gl1",
+            cwd: "/Users/test/Projects/greplong",
+            message: { role: "user", content: longContent },
+          }),
+        ]);
+        const s = new ConversationStore(TEST_DIR);
+        await s.load();
+        const idx = new SearchIndex();
+        idx.buildFrom(s.getAllConversations());
+        const h2 = createHandler(s, idx);
+        h2.setReady();
+
+        // Act
+        const result = h2.handle({
+          action: "read",
+          session_id: "sess-greplong",
+          query: "scaling",
+        });
+
+        // Assert
+        const parsed = JSON.parse(result);
+        expect(parsed.messages[0].content.length).toBeLessThanOrEqual(500);
+        expect(parsed.messages[0].contentLength).toBe(longContent.length);
+      });
     });
 
     it("returns error for unknown session", () => {

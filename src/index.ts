@@ -41,7 +41,7 @@ Actions:
 - stats: Overview of all conversations and projects
 - list: Browse by project/date (optional: project, after, before, limit)
 - search: BM25 keyword search (requires: query, optional: project, limit)
-- read: Read full conversation (requires: session_id from search/list results, optional: offset, limit)`,
+- read: Read conversation (requires: session_id). Browse mode: paginate with offset/limit, messages truncated to 500 chars with contentLength. Focus mode: use limit=1 for full content. Grep mode: pass query to find matching messages with ±2 surrounding context.`,
   historyToolSchema.shape,
   async (args) => ({
     content: [{ type: "text", text: handler.handle(args) }],
