@@ -3,7 +3,7 @@
 [![CI Status](https://github.com/Stefan-Nitu/mcp-claude-code-conversation-history/actions/workflows/ci.yml/badge.svg)](https://github.com/Stefan-Nitu/mcp-claude-code-conversation-history/actions/workflows/ci.yml)
 [![MIT Licensed](https://img.shields.io/npm/l/mcp-claude-code-conversation-history)](https://github.com/Stefan-Nitu/mcp-claude-code-conversation-history/blob/main/LICENSE)
 
-# MCP Claude Code Memory
+# MCP Claude Code Conversation History
 
 A Model Context Protocol (MCP) server that gives Claude Code access to its own conversation history. Search, browse, and read past conversations across all projects using BM25 keyword search.
 
@@ -11,7 +11,7 @@ A Model Context Protocol (MCP) server that gives Claude Code access to its own c
 
 Every Claude Code session starts fresh — you can't ask "what did we discuss about auth last week?" or "show me that refactoring conversation". Your conversation history sits in JSONL files on disk, invisible to Claude.
 
-MCP Claude Code Memory indexes those files and exposes them through a single MCP tool, so Claude can search and read its own past conversations.
+MCP Claude Code Conversation History indexes those files and exposes them through a single MCP tool, so Claude can search and read its own past conversations.
 
 **Key Features:**
 - **BM25 Search** - Keyword search with relevance ranking via [MiniSearch](https://github.com/lucaongo/minisearch)
